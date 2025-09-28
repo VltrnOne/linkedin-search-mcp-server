@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LinkedIn Client Search</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #0077b5;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        #load-profiles-btn {
+            background-color: #0077b5;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-bottom: 20px;
+        }
+        #load-profiles-btn:hover {
+            background-color: #005885;
+        }
+        #profiles-list {
+            margin-top: 20px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 20px;
+            background-color: #fafafa;
+        }
+        .profile-item {
+            background: white;
+            margin: 10px 0;
+            padding: 15px;
+            border-radius: 4px;
+            border-left: 4px solid #0077b5;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .profile-name {
+            font-weight: bold;
+            color: #333;
+            font-size: 18px;
+        }
+        .profile-title {
+            color: #666;
+            font-style: italic;
+            margin: 5px 0;
+        }
+        .profile-company {
+            color: #0077b5;
+            font-weight: 500;
+        }
+        .profile-location {
+            color: #888;
+            font-size: 14px;
+        }
+        .profile-status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        .status-processed { background-color: #d4edda; color: #155724; }
+        .status-new_lead { background-color: #fff3cd; color: #856404; }
+        .status-test_data { background-color: #f8d7da; color: #721c24; }
+        .loading {
+            text-align: center;
+            color: #666;
+            font-style: italic;
+        }
+        .error {
+            color: #dc3545;
+            background-color: #f8d7da;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>LinkedIn Client Search</h1>
+        <button id="load-profiles-btn">Load All Profiles</button>
+        <div id="profiles-list">
+            <div class="loading">Click "Load All Profiles" to see the data</div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('load-profiles-btn').addEventListener('click', async function() {
+            const profilesList = document.getElementById('profiles-list');
+            profilesList.innerHTML = '<div class="loading">Loading profiles...</div>';
+            
+            try {
+                const response = await fetch('http://localhost:3001/mcp/execute/list_profiles', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({})
+                });
+                
+                const data = await response.json();
+                
+                if (data.status === 'success' && data.result.profiles) {
+                    const profiles = data.result.profiles;
+                    
+                    if (profiles.length === 0) {
+                        profilesList.innerHTML = '<div class="loading">No profiles found in the database.</div>';
+                        return;
+                    }
+                    
+                    let html = '';
+                    profiles.forEach(profile => {
+                        const [id, fullName, title, company, location, status, createdAt] = profile;
+                        const statusClass = `status-${status || 'unknown'}`;
+                        
+                        html += `
+                            <div class="profile-item">
+                                <div class="profile-name">${fullName || 'Unknown Name'}</div>
+                                <div class="profile-title">${title || 'No title'}</div>
+                                <div class="profile-company">${company || 'No company'}</div>
+                                <div class="profile-location">${location || 'No location'}</div>
+                                <div class="profile-status ${statusClass}">${status || 'Unknown'}</div>
+                                <div style="font-size: 12px; color: #999; margin-top: 5px;">
+                                    ID: ${id} | Created: ${new Date(createdAt).toLocaleDateString()}
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    profilesList.innerHTML = html;
+                } else {
+                    profilesList.innerHTML = '<div class="error">Error loading profiles: ' + (data.error || 'Unknown error') + '</div>';
+                }
+            } catch (error) {
+                profilesList.innerHTML = '<div class="error">Failed to load profiles: ' + error.message + '</div>';
+            }
+        });
+    </script>
+</body>
+</html>

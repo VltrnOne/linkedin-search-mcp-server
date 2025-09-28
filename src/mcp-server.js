@@ -97,6 +97,49 @@ const fastify = require('fastify')({
           profileId: { type: 'string' }
         }
       }
+    },
+    
+    // Profile Management Tools
+    'list_profiles': {
+      name: 'list_profiles',
+      description: 'List all profiles from the database',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          limit: { type: 'number' },
+          offset: { type: 'number' }
+        }
+      }
+    },
+    
+    // Obsidian Integration Tools
+    'create_obsidian_note': {
+      name: 'create_obsidian_note',
+      description: 'Create a structured note in Obsidian vault',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          noteType: { type: 'string', enum: ['client', 'lead', 'analysis', 'meeting'] },
+          profileData: { type: 'object' },
+          aiSummary: { type: 'string' },
+          customContent: { type: 'string' }
+        },
+        required: ['noteType', 'profileData']
+      }
+    },
+    
+    // LinkedIn Search Tools
+    'search_linkedin': {
+      name: 'search_linkedin',
+      description: 'Search LinkedIn for people profiles using keywords',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          keywords: { type: 'string' },
+          location: { type: 'string' }
+        },
+        required: ['keywords']
+      }
     }
   };
   
@@ -162,6 +205,15 @@ const fastify = require('fastify')({
             break;
           case 'get_person_profile':
             result = await this.getPersonProfile(input);
+            break;
+          case 'list_profiles':
+            result = await this.listProfiles(input);
+            break;
+          case 'create_obsidian_note':
+            result = await this.createObsidianNote(input);
+            break;
+          case 'search_linkedin':
+            result = await this.searchLinkedin(input);
             break;
           default:
             throw new Error(`Unknown tool: ${toolName}`);
@@ -412,6 +464,156 @@ const fastify = require('fastify')({
           location: 'Sample Location'
         }
       };
+    }
+    
+    static async listProfiles({ limit = 50, offset = 0 } = {}) {
+      // Implementation for listing all profiles
+      const query = `
+        SELECT id, full_name, title, company, location, status, created_at 
+        FROM profiles 
+        ORDER BY id DESC
+        OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
+      `;
+      
+      const binds = { limit, offset };
+      
+      const result = await this.executeOracleQuery({ query, binds });
+      
+      return {
+        profiles: result.rows,
+        total: result.rows.length,
+        limit,
+        offset,
+        metaData: result.metaData
+      };
+    }
+    
+    static async createObsidianNote({ noteType, profileData, aiSummary, customContent }) {
+      const fs = require('fs').promises;
+      const path = require('path');
+      
+      try {
+        // Generate note content based on type
+        const noteContent = this.formatObsidianNote(noteType, profileData, aiSummary, customContent);
+        
+        // Generate filename
+        const timestamp = new Date().toISOString().split('T')[0];
+        const safeName = (profileData.full_name || 'Unknown').replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_');
+        const filename = `${noteType}_${safeName}_${timestamp}.md`;
+        
+        // Create vault directory if it doesn't exist
+        const vaultPath = '/Users/Morpheous/Documents/Obsidian Vault';
+        await fs.mkdir(vaultPath, { recursive: true });
+        
+        // Write file directly to vault
+        const filePath = path.join(vaultPath, filename);
+        await fs.writeFile(filePath, noteContent, 'utf8');
+        
+        return {
+          success: true,
+          filename,
+          path: filePath,
+          noteType,
+          profileName: profileData.full_name,
+          vaultPath: vaultPath
+        };
+        
+      } catch (error) {
+        throw new Error(`Obsidian note creation failed: ${error.message}`);
+      }
+    }
+    
+    static formatObsidianNote(noteType, profileData, aiSummary, customContent) {
+      const timestamp = new Date().toISOString();
+      const { full_name, title, company, location, linkedin_url, status } = profileData;
+      
+      let content = `# ${full_name || 'Unknown Profile'}\n\n`;
+      content += `**Type:** ${noteType}\n`;
+      content += `**Created:** ${timestamp}\n`;
+      content += `**Status:** ${status || 'Unknown'}\n\n`;
+      
+      content += `## Profile Information\n\n`;
+      content += `- **Name:** ${full_name || 'N/A'}\n`;
+      content += `- **Title:** ${title || 'N/A'}\n`;
+      content += `- **Company:** ${company || 'N/A'}\n`;
+      content += `- **Location:** ${location || 'N/A'}\n`;
+      content += `- **LinkedIn:** ${linkedin_url ? `[View Profile](${linkedin_url})` : 'N/A'}\n\n`;
+      
+      if (aiSummary) {
+        content += `## AI Analysis\n\n${aiSummary}\n\n`;
+      }
+      
+      if (customContent) {
+        content += `## Additional Notes\n\n${customContent}\n\n`;
+      }
+      
+      content += `## Tags\n\n`;
+      content += `#${noteType} #linkedin #profile`;
+      if (company) content += ` #${company.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()}`;
+      if (location) content += ` #${location.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()}`;
+      
+      return content;
+    }
+    
+    static async searchLinkedin({ keywords, location = '' }) {
+      const puppeteer = require('puppeteer');
+      
+      const cookie = {
+        name: 'li_at',
+        value: process.env.LINKEDIN_MCP_SERVER_COOKIE,
+        domain: '.linkedin.com',
+      };
+
+      if (!cookie.value) {
+        throw new Error('LinkedIn session cookie is not configured in .env file.');
+      }
+
+      const browser = await puppeteer.launch({ 
+        headless: true, 
+        executablePath: '/usr/bin/chromium',
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] 
+      });
+      const page = await browser.newPage();
+
+      try {
+        await page.setCookie(cookie);
+        const searchUrl = `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(keywords)}&origin=GLOBAL_SEARCH_HEADER&sid=G%3BO`;
+        await page.goto(searchUrl, { waitUntil: 'networkidle2' });
+
+        // Wait for the search results to load
+        await page.waitForSelector('.reusable-search__result-container', { timeout: 10000 });
+
+        const results = await page.evaluate(() => {
+          const profiles = [];
+          const resultElements = document.querySelectorAll('.reusable-search__result-container');
+
+          resultElements.forEach(element => {
+            const nameElement = element.querySelector('.entity-result__title-text a');
+            const titleElement = element.querySelector('.entity-result__primary-subtitle');
+
+            if (nameElement && titleElement) {
+              profiles.push({
+                name: nameElement.innerText.trim(),
+                title: titleElement.innerText.trim(),
+                profileUrl: nameElement.href,
+              });
+            }
+          });
+          return profiles.slice(0, 10); // Return top 10 results
+        });
+
+        return { 
+          status: 'success', 
+          count: results.length, 
+          results: results,
+          searchKeywords: keywords,
+          searchLocation: location
+        };
+      } catch (error) {
+        throw new Error(`LinkedIn search failed: ${error.message}`);
+      } finally {
+        await browser.close();
+      }
     }
   
     static buildSearchQuery({ industry, location, jobTitle, companySize, keywords }) {
